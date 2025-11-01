@@ -1,4 +1,3 @@
-// app/api/projects/route.ts
 import { supabaseServer } from "../../lib/supabaseServer";
 
 export async function GET() {
@@ -8,9 +7,10 @@ export async function GET() {
     .order("created_at", { ascending: true });
 
   if (error) {
-    return new Response(error.message, { status: 500 });
+    return Response.json({ error: error.message }, { status: 500 });
   }
-  return Response.json(data);
+
+  return Response.json(data ?? []);
 }
 
 export async function POST(req: Request) {
@@ -21,13 +21,14 @@ export async function POST(req: Request) {
     .insert({
       name: body.name,
       color: body.color ?? "#6366f1",
-      owner: body.owner ?? null
+      owner: body.owner ?? null,
     })
     .select()
     .single();
 
   if (error) {
-    return new Response(error.message, { status: 500 });
+    return Response.json({ error: error.message }, { status: 500 });
   }
+
   return Response.json(data);
 }

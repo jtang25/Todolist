@@ -48,17 +48,32 @@ export default function Home() {
   );
 
   async function refreshProjects(keepCurrent = false) {
-    const res = await fetch("/api/projects");
-    const data: Project[] = await res.json();
-    setProjects(data);
-    setActiveProject((prev) => {
-      if (!keepCurrent || !prev) {
-        return data[0] ?? null;
-      }
-      const found = data.find((p) => p.id === prev.id);
-      return found ?? (data[0] ?? null);
-    });
+  const res = await fetch("/api/projects", { cache: "no-store" });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    console.error("Failed to load projects:", res.status, txt);
+    return;
   }
+
+  let data: Project[] = [];
+  try {
+    data = await res.json();
+  } catch (e) {
+    console.error("Projects JSON parse failed:", e);
+    data = [];
+  }
+
+  setProjects(data);
+  setActiveProject((prev) => {
+    if (!keepCurrent || !prev) {
+      return data[0] ?? null;
+    }
+    const found = data.find((p) => p.id === prev.id);
+    return found ?? (data[0] ?? null);
+  });
+}
+
 
   async function refreshTasks(projectId: string) {
     const res = await fetch(`/api/projects/${projectId}/tasks`);
