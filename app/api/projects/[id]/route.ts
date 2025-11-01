@@ -1,70 +1,113 @@
-// app/api/tasks/[id]/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer } from "../../../lib/supabaseServer";
+// app/api/projects/[id]/route.ts
+import { NextResponse } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
 
-export async function GET(
-  _req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  const { id } = await ctx.params;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-  const { data, error } = await supabaseServer
-    .from("tasks")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+const ROOT = path.join(process.cwd(), "data", "projects"); // change if your stuff lives elsewhere
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+async function exists(p: string) {
+  try {
+    await fs.stat(p);
+    return true;
+  } catch {
+    return false;
   }
-  if (!data) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(data);
 }
 
-export async function PATCH(
-  req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  const { id } = await ctx.params;
-  const body = await req.json();
+async function deletePhysical(id: string) {
+  const asDir = path.join(ROOT, id);
+  const asFile = path.join(ROOT, `${id}.json`);
 
-  // only allow these fields now (you removed priority)
-  const updates: Record<string, any> = {};
-  if (typeof body.title === "string") updates.title = body.title;
-  if (typeof body.notes === "string" || body.notes === null)
-    updates.notes = body.notes;
-  if (typeof body.status === "string") updates.status = body.status;
-  if (typeof body.due_date === "string" || body.due_date === null)
-    updates.due_date = body.due_date;
-
-  const { data, error } = await supabaseServer
-    .from("tasks")
-    .update(updates)
-    .eq("id", id)
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (await exists(asDir)) {
+    await fs.rm(asDir, { recursive: true, force: true });
+    return true;
   }
+  if (await exists(asFile)) {
+    await fs.rm(asFile, { force: true });
+    return true;
+  }
+  return false;
+}
 
-  return NextResponse.json(data);
+// ← THIS is the important part
+function extractId(req: Request, params?: Record<string, string | undefined>) {
+  // 1) try all the usual param names
+  const fromParams =
+    params?.id ??
+    params?.projectId ??
+    params?.project_uuid ??
+    params?.project ??
+    params?.pid;
+
+  if (fromParams) return fromParams;
+
+  // 2) fallback: read from URL path
+  const url = new URL(req.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  // e.g. /api/projects/123  -> ["api","projects","123"]
+  const last = parts[parts.length - 1];
+  if (!last || last === "projects") return undefined;
+  return decodeURIComponent(last);
 }
 
 export async function DELETE(
-  _req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }
+  req: Request,
+  ctx: { params?: Record<string, string | undefined> }
 ) {
-  const { id } = await ctx.params;
+  try {
+    const id = extractId(req, ctx.params);
 
-  const { error } = await supabaseServer.from("tasks").delete().eq("id", id);
+    // log what we're actually getting
+    console.log("DELETE /api/projects/[id]", {
+      gotParams: ctx.params,
+      pathname: new URL(req.url).pathname,
+      extracted: id,
+    });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!id) {
+      return NextResponse.json(
+        {
+          error: "Missing id",
+          debug: {
+            params: ctx.params,
+            pathname: new URL(req.url).pathname,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const removed = await deletePhysical(id);
+    if (!removed) {
+      return NextResponse.json(
+        { error: "Not found", id },
+        { status: 404 }
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  } catch (err: any) {
+    console.error("DELETE /api/projects/[id] failed:", err);
+    return NextResponse.json(
+      { error: err?.message ?? String(err) },
+      { status: 500 }
+    );
   }
+}
 
-  return NextResponse.json({ ok: true });
+export async function HEAD(
+  req: Request,
+  ctx: { params?: Record<string, string | undefined> }
+) {
+  const id = extractId(req, ctx.params);
+  if (!id) return new Response(null, { status: 400 });
+
+  const present =
+    (await exists(path.join(ROOT, id))) ||
+    (await exists(path.join(ROOT, `${id}.json`)));
+
+  return new Response(null, { status: present ? 200 : 404 });
 }

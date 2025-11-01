@@ -11,6 +11,7 @@ import DatePicker from "@/components/DatePicker";
 import TimelineView from "@/components/TimelineView";
 import StatsPanel from "@/components/StatsPanel";
 import PrioritySelect from "@/components/PrioritySelect";
+import TaskDetailsModal from "@/components/TaskDetailsModal";
 
 type Project = {
   id: string;
@@ -63,7 +64,7 @@ export default function Home() {
     const res = await fetch(`/api/projects/${projectId}/tasks`);
     const data: Task[] = await res.json();
     setTasks(data);
-    setSelectedTaskId(data[0]?.id ?? null);
+    setSelectedTaskId(null);
   }
 
   useEffect(() => {
@@ -126,22 +127,53 @@ export default function Home() {
   }
 
   async function handleDeleteProject(id: string) {
-    setProjects((prev) => prev.filter((p) => p.id !== id));
-    setActiveProject((prev) => {
-      if (!prev) return prev;
-      if (prev.id !== id) return prev;
-      return null;
+  try {
+    const encoded = encodeURIComponent(id);
+    const res = await fetch(`/api/projects/${encoded}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
     });
-    setTasks([]);
-    setSelectedTaskId(null);
 
-    const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
     if (!res.ok) {
-      console.error("Delete failed, reloading projects");
-      await refreshProjects(false);
+      let reason: any = null;
+      try {
+        reason = await res.json();
+      } catch {
+        reason = await res.text();
+      }
+      console.error(
+        "Delete failed (server returned !ok). Status:",
+        res.status,
+        reason
+      );
+      await refreshProjects(true);
+      return;
     }
+
+    const verify = await fetch(`/api/projects/${encoded}`, {
+      method: "HEAD",
+      cache: "no-store",
+    });
+
+    if (verify.ok) {
+      console.error("Delete verification failed: resource still exists.");
+      await refreshProjects(true);
+      return;
+    }
+
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setActiveProject((prev) => (prev?.id === id ? null : prev));
+    setTasks((prev) => (activeProject?.id === id ? [] : prev));
+    setSelectedTaskId((prev) => (activeProject?.id === id ? null : prev));
     setViewMode("board");
+    refreshProjects(true).catch(() => {});
+  } catch (err) {
+    console.error("Delete threw:", err);
+    await refreshProjects(true);
   }
+}
+
 
   async function handleAddTask() {
     if (!activeProject || !newTaskTitle.trim()) return;
@@ -320,8 +352,10 @@ export default function Home() {
                 />
               )}
 
-              <TaskDetails
+              <TaskDetailsModal
                 task={selectedTask}
+                open={selectedTask != null}
+                onClose={() => setSelectedTaskId(null)}
                 onSave={handleSaveTaskDetails}
                 onDelete={handleDeleteTask}
               />
