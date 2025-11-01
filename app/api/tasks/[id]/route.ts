@@ -1,6 +1,6 @@
 // app/api/tasks/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabaseServer";
+import { supabaseServer } from "../../../lib/supabaseServer";
 
 type Params = { id: string };
 
